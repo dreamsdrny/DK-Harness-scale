@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Conversation Wheel Zoom",
+    "description": "Zoom only the conversation area — transcript text, cards, padding and the composer — with Ctrl + mouse wheel. A small corner pill shows the current percentage and steps it back to 100%."
+  }
+}

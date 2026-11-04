@@ -1,0 +1,30 @@
+{
+  "name": "@local/ui-wheel-zoom",
+  "version": "1.1.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "description": "Zoom only the Harness conversation area (transcript, cards and composer) with Ctrl + mouse wheel, with a corner pill for step and reset.",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": []
+    }
+  }
+}

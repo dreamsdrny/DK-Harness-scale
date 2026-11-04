@@ -1,0 +1,3 @@
+- insert:
+    - id: ui-wheel-zoom
+      name: '@local/ui-wheel-zoom'
