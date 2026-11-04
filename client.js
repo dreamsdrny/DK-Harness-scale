@@ -118,6 +118,9 @@ window.__ModuleLoader__.load({
         if (!SCROLLABLE.has(getComputedStyle(element).overflowY)) continue;
         const rect = element.getBoundingClientRect();
         if (rect.left < leftLimit) continue;
+        // The conversation sits between the rails, so its centre is close to
+        // the window centre; a list hanging off the sidebar is not.
+        if (Math.abs(rect.left + rect.width / 2 - windowWidth / 2) > windowWidth * 0.35) continue;
         const area = rect.width * rect.height;
         if (area <= bestArea) continue;
         bestArea = area;
