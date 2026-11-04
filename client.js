@@ -26,7 +26,7 @@ window.__ModuleLoader__.load({
     const NS = 'ui-wheel-zoom';
     const STORAGE_KEY = 'dsh.ui-wheel-zoom.factor';
     const MIN = 0.5;
-    const MAX = 2.5;
+    const MAX = 2;
     const DEFAULT = 1;
     /** Exponential rate: a ~100px wheel notch is about one 10% step. */
     const WHEEL_RATE = 0.0012;
@@ -93,13 +93,16 @@ window.__ModuleLoader__.load({
 
     /**
      * The transcript scroller: the largest scrollable box that ends above the
-     * anchor. Requiring it to sit above the composer dock keeps the editor and
-     * the queue docks from being mistaken for the transcript. A short
-     * transcript does not overflow yet, so the tallest non-overflowing box wins
-     * when nothing scrolls.
+     * anchor and shares its column. The column test (same horizontal centre,
+     * most of the window width) is what keeps the sidebar's session and
+     * workspace lists out: they end above the dock too, but they sit at the
+     * left edge of the window. A short transcript does not overflow yet, so the
+     * tallest non-overflowing box wins when nothing scrolls.
      */
     function findTranscript(anchor) {
       const anchorRect = anchor.getBoundingClientRect();
+      const anchorCentre = anchorRect.left + anchorRect.width / 2;
+      const windowWidth = window.innerWidth;
       let overflowing = null;
       let overflowingArea = 0;
       let tallest = null;
@@ -111,6 +114,8 @@ window.__ModuleLoader__.load({
         if (overflow !== 'auto' && overflow !== 'scroll') continue;
         const rect = element.getBoundingClientRect();
         if (rect.bottom > anchorRect.top + 12) continue;
+        if (rect.width < windowWidth * 0.3) continue;
+        if (Math.abs(rect.left + rect.width / 2 - anchorCentre) > windowWidth * 0.3) continue;
         const size = rect.width * rect.height;
         if (element.scrollHeight > element.clientHeight + 8) {
           if (size > overflowingArea) {
@@ -127,11 +132,15 @@ window.__ModuleLoader__.load({
 
     /** The nearest ancestor of the anchor that also contains the transcript. */
     function findPanel(anchor, transcript) {
+      const transcriptRect = transcript.getBoundingClientRect();
       let element = anchor.parentElement;
       while (element && element !== document.body) {
         if (element.contains(transcript)) {
           const rect = element.getBoundingClientRect();
           if (rect.width < 240 || rect.height < 240) return null;
+          // A frame that starts far left of the transcript also owns the
+          // sidebar; refuse it rather than scaling the navigation.
+          if (Math.abs(rect.left - transcriptRect.left) > 160) return null;
           return element;
         }
         element = element.parentElement;
@@ -139,12 +148,17 @@ window.__ModuleLoader__.load({
       return null;
     }
 
+    /**
+     * The panel is preferred so the composer scales with the transcript. When
+     * the common frame also owns the sidebar (so it must not be scaled), the
+     * transcript alone is the safe fallback.
+     */
     function resolvePanel() {
       const anchor = document.querySelector(`[${ANCHOR}]`);
       if (!anchor) return null;
       const transcript = findTranscript(anchor);
       if (!transcript) return null;
-      return findPanel(anchor, transcript);
+      return findPanel(anchor, transcript) || transcript;
     }
 
     /** Apply the factor to the conversation panel; 100% removes the property. */
