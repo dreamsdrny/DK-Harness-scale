@@ -1,16 +1,16 @@
 /**
  * Wheel zoom for the conversation area.
  *
- * Only the conversation body (transcript + composer) is scaled: a fixed CSS
- * `zoom` on that panel multiplies its absolute lengths — type, padding, icons,
+ * Only the conversation transcript is scaled: a fixed CSS `zoom` on its scroll
+ * container multiplies the absolute lengths inside it — type, padding, icons,
  * controls — while percentage-sized boxes keep the width the layout gave them,
  * so the chat reflows inside its column instead of overflowing it. The sidebar,
- * the header and the rest of the shell stay at 100%.
+ * the header, the composer and the rest of the shell stay at 100%.
  *
- * The panel is located from a zero-size anchor this plugin renders in the
- * composer dock, so no host class name is hard-coded: the transcript is the
- * large scroll container above that anchor, and the panel is the nearest
- * ancestor that contains it.
+ * The transcript is located by geometry (the largest scrollable box in the
+ * middle band of the window), so no host class name is hard-coded and the
+ * navigation rail on the left can never be picked. A zero-size anchor rendered
+ * in the composer dock is the last-resort target while nothing scrolls yet.
  *
  * Triggers:
  *  - Ctrl (or Cmd) + wheel anywhere in the page;
@@ -55,7 +55,10 @@ window.__ModuleLoader__.load({
 
     let factor = DEFAULT;
     let exact = DEFAULT;
+    /** The element `zoom` is applied to: the conversation transcript. */
     let panel = null;
+    /** The factor the box was pinned for when the zoom would spill. */
+    let fittedFor = 0;
     const subscribers = new Set();
 
     function clamp(value) {
@@ -91,56 +94,56 @@ window.__ModuleLoader__.load({
     // Locating the conversation panel
     // ------------------------------------------------------------------
 
+    const SCROLLABLE = new Set(['auto', 'scroll', 'overlay']);
+
     /**
-     * The transcript scroller: the largest scrollable box that ends above the
-     * anchor and shares its column. The column test (same horizontal centre,
-     * most of the window width) is what keeps the sidebar's session and
-     * workspace lists out: they end above the dock too, but they sit at the
-     * left edge of the window. A short transcript does not overflow yet, so the
-     * tallest non-overflowing box wins when nothing scrolls.
+     * The transcript: the largest scrollable box in the middle band of the
+     * window. It is located by geometry alone, not from the composer dock: the
+     * composer bar is not guaranteed to live inside the conversation column (a
+     * shell-level bottom bar would make the nearest common frame a frame that
+     * also owns the sidebar, which must never scale). The left band is the
+     * navigation rail, so a box starting there is never the conversation.
      */
-    function findTranscript(anchor) {
-      const anchorRect = anchor.getBoundingClientRect();
-      const anchorCentre = anchorRect.left + anchorRect.width / 2;
+    function findTranscript() {
       const windowWidth = window.innerWidth;
-      let overflowing = null;
-      let overflowingArea = 0;
-      let tallest = null;
-      let tallestArea = 0;
+      const windowHeight = window.innerHeight;
+      const leftLimit = windowWidth * 0.04;
+      const minHeight = Math.min(320, windowHeight * 0.35);
+      let best = null;
+      let bestArea = 0;
       for (const element of document.querySelectorAll('*')) {
-        if (element === anchor || element.contains(anchor)) continue;
-        if (element.clientHeight < 160 || element.clientWidth < 240) continue;
-        const overflow = getComputedStyle(element).overflowY;
-        if (overflow !== 'auto' && overflow !== 'scroll') continue;
+        if (element === document.body || element === document.documentElement) continue;
+        if (element.clientHeight < minHeight) continue;
+        if (element.clientWidth < windowWidth * 0.3) continue;
+        if (!SCROLLABLE.has(getComputedStyle(element).overflowY)) continue;
         const rect = element.getBoundingClientRect();
-        if (rect.bottom > anchorRect.top + 12) continue;
-        if (rect.width < windowWidth * 0.3) continue;
-        if (Math.abs(rect.left + rect.width / 2 - anchorCentre) > windowWidth * 0.3) continue;
-        const size = rect.width * rect.height;
-        if (element.scrollHeight > element.clientHeight + 8) {
-          if (size > overflowingArea) {
-            overflowingArea = size;
-            overflowing = element;
-          }
-        } else if (size > tallestArea) {
-          tallestArea = size;
-          tallest = element;
-        }
+        if (rect.left < leftLimit) continue;
+        const area = rect.width * rect.height;
+        if (area <= bestArea) continue;
+        bestArea = area;
+        best = element;
       }
-      return overflowing || tallest;
+      return best;
     }
 
-    /** The nearest ancestor of the anchor that also contains the transcript. */
-    function findPanel(anchor, transcript) {
-      const transcriptRect = transcript.getBoundingClientRect();
+    /**
+     * Last resort while nothing scrolls yet (an empty conversation): the
+     * nearest ancestor of the composer anchor that is not the whole frame. The
+     * left and width bounds keep a frame that also owns the sidebar out.
+     */
+    function findFrameFromAnchor() {
+      const anchor = document.querySelector(`[${ANCHOR}]`);
+      if (!anchor) return null;
+      const windowWidth = window.innerWidth;
       let element = anchor.parentElement;
       while (element && element !== document.body) {
-        if (element.contains(transcript)) {
-          const rect = element.getBoundingClientRect();
-          if (rect.width < 240 || rect.height < 240) return null;
-          // A frame that starts far left of the transcript also owns the
-          // sidebar; refuse it rather than scaling the navigation.
-          if (Math.abs(rect.left - transcriptRect.left) > 160) return null;
+        const rect = element.getBoundingClientRect();
+        if (
+          rect.width >= 240 &&
+          rect.height >= 240 &&
+          rect.left > windowWidth * 0.04 &&
+          rect.width < windowWidth * 0.92
+        ) {
           return element;
         }
         element = element.parentElement;
@@ -148,27 +151,55 @@ window.__ModuleLoader__.load({
       return null;
     }
 
-    /**
-     * The panel is preferred so the composer scales with the transcript. When
-     * the common frame also owns the sidebar (so it must not be scaled), the
-     * transcript alone is the safe fallback.
-     */
-    function resolvePanel() {
-      const anchor = document.querySelector(`[${ANCHOR}]`);
-      if (!anchor) return null;
-      const transcript = findTranscript(anchor);
-      if (!transcript) return null;
-      return findPanel(anchor, transcript) || transcript;
+    function resolveTarget() {
+      return findTranscript() || findFrameFromAnchor();
     }
 
-    /** Apply the factor to the conversation panel; 100% removes the property. */
+    /** Apply the factor; 100% removes every property this plugin added. */
     function paint(value) {
       if (!panel || !panel.isConnected) {
-        panel = resolvePanel();
-        if (!panel) return;
+        panel = resolveTarget();
+        fittedFor = 0;
       }
-      if (value === DEFAULT) panel.style.removeProperty('zoom');
-      else panel.style.zoom = String(value);
+      if (!panel) return;
+      if (fittedFor !== 0) {
+        panel.style.removeProperty('width');
+        panel.style.removeProperty('height');
+        panel.style.removeProperty('flex');
+        fittedFor = 0;
+      }
+      if (value === DEFAULT) {
+        panel.style.removeProperty('zoom');
+        return;
+      }
+      panel.style.zoom = String(value);
+      fit(value);
+    }
+
+    /**
+     * A zoomed box normally keeps the size its layout gave it, so the chat only
+     * reflows. If this Chromium instead multiplies the box itself, the box
+     * would spill out of its column; pin it to the column then.
+     */
+    function fit(value) {
+      const parent = panel && panel.parentElement;
+      if (!parent) return;
+      const parentRect = parent.getBoundingClientRect();
+      const rect = panel.getBoundingClientRect();
+      if (rect.width <= parentRect.width + 8 && rect.height <= parentRect.height + 8) return;
+      panel.style.flex = '0 0 auto';
+      panel.style.width = `${Math.max(120, Math.floor(parentRect.width / value))}px`;
+      panel.style.height = `${Math.max(120, Math.floor(parentRect.height / value))}px`;
+      fittedFor = value;
+    }
+
+    function release() {
+      if (!panel) return;
+      panel.style.removeProperty('zoom');
+      panel.style.removeProperty('width');
+      panel.style.removeProperty('height');
+      panel.style.removeProperty('flex');
+      fittedFor = 0;
     }
 
     function commit(next, save) {
@@ -547,7 +578,7 @@ window.__ModuleLoader__.load({
         return () => {
           window.removeEventListener('wheel', onWindowWheel);
           window.clearInterval(retry);
-          if (panel) panel.style.removeProperty('zoom');
+          release();
           panel = null;
         };
       }, 'ui-wheel-zoom: conversation wheel zoom');
